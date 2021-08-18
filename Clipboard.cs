@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 
@@ -40,7 +41,7 @@ namespace ClipboardRedux
             }
 
             // Check if the returned value is actually a wrapped managed instance.
-            if (CCW_IDataObject.TryGetInstance(instance, out Forms_IDataObject forms_dataObject))
+            if (CCW_IDataObject.TryGetInstance(instance, out Forms_IDataObject? forms_dataObject))
             {
                 return forms_dataObject;
             }
@@ -215,9 +216,15 @@ namespace ClipboardRedux
         public static readonly Guid IID_IUnknown = new Guid("00000000-0000-0000-C000-000000000046");
 
         // IUnknown
+#if NET50_OR_GREATER
         public delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, int> QueryInterface;
         public delegate* unmanaged[Stdcall]<IntPtr, int> AddRef;
         public delegate* unmanaged[Stdcall]<IntPtr, int> Release;
+#else
+        public IntPtr QueryInterface;
+        public IntPtr AddRef;
+        public IntPtr Release;
+#endif
     }
 
     internal unsafe struct DataObjectVTable
@@ -227,6 +234,7 @@ namespace ClipboardRedux
         public IUnknownVTable UnknownVTable;
 
         // IDataObject
+#if NET50_OR_GREATER
         public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, STGMEDIUM_Blittable*, int> GetData;
         public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, STGMEDIUM_Blittable*, int> GetDataHere;
         public delegate* unmanaged[Stdcall]<IntPtr, /*optional*/ FORMATETC*, int> QueryGetData;
@@ -236,6 +244,17 @@ namespace ClipboardRedux
         public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, int, IntPtr, int*, int> DAdvise;
         public delegate* unmanaged[Stdcall]<IntPtr, int, int> DUnadvise;
         public delegate* unmanaged[Stdcall]<IntPtr, IntPtr*, int> EnumDAdvise;
+#else
+        public IntPtr GetData;
+        public IntPtr GetDataHere;
+        public IntPtr QueryGetData;
+        public IntPtr GetCanonicalFormatEtc;
+        public IntPtr SetData;
+        public IntPtr EnumFormatEtc;
+        public IntPtr DAdvise;
+        public IntPtr DUnadvise;
+        public IntPtr EnumDAdvise;
+#endif
     }
 
     internal class RCW_IDataObject : IDataObject
@@ -410,6 +429,24 @@ namespace ClipboardRedux
 
     internal static class CCW_IDataObject
     {
+        private const int E_NOTIMPL = unchecked((int)0x80004001);
+
+        // IUnknown
+        private unsafe delegate int QueryInterfaceDelegate(IntPtr _this, Guid* iid, IntPtr* obj);
+        private delegate uint AddRefDelegate(IntPtr _this);
+        private delegate uint ReleaseDelegate(IntPtr _this);
+        // IDataObject
+        private unsafe delegate int GetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
+        private unsafe delegate int GetDataHereDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
+        private unsafe delegate int QueryGetDataDelegate(IntPtr _this, /*optional*/ FORMATETC* format);
+        private unsafe delegate int GetCanonicalFormatEtcDelegate(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut);
+        private unsafe delegate int SetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium, int shouldRelease);
+        private unsafe delegate int EnumFormatEtcDelegate(IntPtr _this, int direction, IntPtr* enumFORMATETC);
+        private unsafe delegate int DAdviseDelegate(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection);
+        private delegate int DUnadviseDelegate(IntPtr _this, int connection);
+        private unsafe delegate int EnumDAdviseDelegate(IntPtr _this, IntPtr* enumSTATDATA);
+
+        private static List<Delegate> delegates = new List<Delegate>();
         private static Lazy<IntPtr> CCWVTable = new Lazy<IntPtr>(AllocateVTable, isThreadSafe: true);
 
         private unsafe struct Lifetime
@@ -423,7 +460,7 @@ namespace ClipboardRedux
         {
             unsafe
             {
-                var wrapper = (Lifetime*)RuntimeHelpers.AllocateTypeAssociatedMemory(dataObject.GetType(), sizeof(Lifetime));
+                var wrapper = (Lifetime*)Marshal.AllocCoTaskMem(sizeof(Lifetime));
 
                 // Create the wrapper instance.
                 wrapper->VTable = (DataObjectVTable*)CCWVTable.Value;
@@ -434,7 +471,7 @@ namespace ClipboardRedux
             }
         }
 
-        public static bool TryGetInstance(IntPtr instanceMaybe, out Forms_IDataObject forms_dataObject)
+        public static bool TryGetInstance(IntPtr instanceMaybe, [NotNullWhen(true)] out Forms_IDataObject? forms_dataObject)
         {
             forms_dataObject = null;
 
@@ -459,23 +496,51 @@ namespace ClipboardRedux
             unsafe
             {
                 // Allocate and create a singular VTable for this type projection.
-                var vtable = (DataObjectVTable*)RuntimeHelpers.AllocateTypeAssociatedMemory(typeof(CCW_IDataObject), sizeof(DataObjectVTable));
+                var vtable = (DataObjectVTable*)Marshal.AllocCoTaskMem(sizeof(DataObjectVTable));
+
+                var queryInterfaceDelegate = new QueryInterfaceDelegate(QueryInterface);
+                var addRefDelegate = new AddRefDelegate(AddRef);
+                var releaseDelegate = new ReleaseDelegate(Release);
+                var getDataDelegate = new GetDataDelegate(GetData);
+                var getDataHereDelegate = new GetDataHereDelegate(GetDataHere);
+                var queryGetDataDelegate = new QueryGetDataDelegate(QueryGetData);
+                var getCanonicalFormatEtcDelegate = new GetCanonicalFormatEtcDelegate(GetCanonicalFormatEtc);
+                var setDataDelegate = new SetDataDelegate(SetData);
+                var enumFormatEtcDelegate = new EnumFormatEtcDelegate(EnumFormatEtc);
+                var dAdviseDelegate = new DAdviseDelegate(DAdvise);
+                var dUnadviseDelegate = new DUnadviseDelegate(DUnadvise);
+                var enumDAdviseDelegate = new EnumDAdviseDelegate(EnumDAdvise);
+
+                delegates.Add(queryInterfaceDelegate);
+                delegates.Add(addRefDelegate);
+                delegates.Add(releaseDelegate);
+                delegates.Add(getDataDelegate);
+                delegates.Add(getDataHereDelegate);
+                delegates.Add(queryGetDataDelegate);
+                delegates.Add(getCanonicalFormatEtcDelegate);
+                delegates.Add(setDataDelegate);
+                delegates.Add(enumFormatEtcDelegate);
+                delegates.Add(dAdviseDelegate);
+                delegates.Add(dUnadviseDelegate);
+                delegates.Add(enumDAdviseDelegate);
 
                 // IUnknown
-                vtable->UnknownVTable.QueryInterface = &QueryInterface;
-                vtable->UnknownVTable.AddRef = &AddRef;
-                vtable->UnknownVTable.Release = &Release;
+                vtable->UnknownVTable.QueryInterface = Marshal.GetFunctionPointerForDelegate(queryInterfaceDelegate);
+                vtable->UnknownVTable.AddRef = Marshal.GetFunctionPointerForDelegate(addRefDelegate);
+                vtable->UnknownVTable.Release = Marshal.GetFunctionPointerForDelegate(releaseDelegate);
 
                 // IDataObject
-                vtable->GetData = &GetData;
-                vtable->GetDataHere = &GetDataHere;
-                vtable->QueryGetData = &QueryGetData;
-                vtable->GetCanonicalFormatEtc = &GetCanonicalFormatEtc;
-                vtable->SetData = &SetData;
-                vtable->EnumFormatEtc = &EnumFormatEtc;
-                vtable->DAdvise = &DAdvise;
-                vtable->DUnadvise = &DUnadvise;
-                vtable->EnumDAdvise = &EnumDAdvise;
+                vtable->GetData = Marshal.GetFunctionPointerForDelegate(getDataDelegate);
+                vtable->GetDataHere = Marshal.GetFunctionPointerForDelegate(getDataDelegate);
+                vtable->GetData = Marshal.GetFunctionPointerForDelegate(getDataDelegate);
+                vtable->GetDataHere = Marshal.GetFunctionPointerForDelegate(getDataHereDelegate);
+                vtable->QueryGetData = Marshal.GetFunctionPointerForDelegate(queryGetDataDelegate);
+                vtable->GetCanonicalFormatEtc = Marshal.GetFunctionPointerForDelegate(getCanonicalFormatEtcDelegate);
+                vtable->SetData = Marshal.GetFunctionPointerForDelegate(setDataDelegate);
+                vtable->EnumFormatEtc = Marshal.GetFunctionPointerForDelegate(enumFormatEtcDelegate);
+                vtable->DAdvise = Marshal.GetFunctionPointerForDelegate(dAdviseDelegate);
+                vtable->DUnadvise = Marshal.GetFunctionPointerForDelegate(dUnadviseDelegate);
+                vtable->EnumDAdvise = Marshal.GetFunctionPointerForDelegate(enumDAdviseDelegate);
 
                 return (IntPtr)vtable;
             }
@@ -494,50 +559,39 @@ namespace ClipboardRedux
         }
 
         // IUnknown
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
         private unsafe static int QueryInterface(IntPtr _this, Guid* iid, IntPtr* ppObject)
         {
-            if (*iid == IUnknownVTable.IID_IUnknown || *iid == DataObjectVTable.IID_IDataObject)
-            {
-                *ppObject = _this;
-            }
-            else
+            if (*iid != IUnknownVTable.IID_IUnknown && *iid != DataObjectVTable.IID_IDataObject)
             {
                 *ppObject = IntPtr.Zero;
                 const int E_NOINTERFACE = unchecked((int)0x80004002L);
                 return E_NOINTERFACE;
             }
 
-            AddRefInternal(_this);
+            *ppObject = _this;
+            AddRef(_this);
             return 0;
         }
 
-        private static int AddRefInternal(IntPtr _this)
+        private static uint AddRef(IntPtr _this)
         {
             unsafe
             {
                 var lifetime = (Lifetime*)_this;
                 Debug.Assert(lifetime->Handle != IntPtr.Zero);
                 Debug.Assert(lifetime->RefCount > 0);
-                return Interlocked.Increment(ref lifetime->RefCount);
+                return (uint)Interlocked.Increment(ref lifetime->RefCount);
             }
         }
 
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-        private static int AddRef(IntPtr _this)
-        {
-            return AddRefInternal(_this);
-        }
-
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-        private static int Release(IntPtr _this)
+        private static uint Release(IntPtr _this)
         {
             unsafe
             {
                 var lifetime = (Lifetime*)_this;
                 Debug.Assert(lifetime->Handle != IntPtr.Zero);
                 Debug.Assert(lifetime->RefCount > 0);
-                int count = Interlocked.Decrement(ref lifetime->RefCount);
+                uint count = (uint)Interlocked.Decrement(ref lifetime->RefCount);
                 if (count == 0)
                 {
                     GCHandle.FromIntPtr(lifetime->Handle).Free();
@@ -548,54 +602,52 @@ namespace ClipboardRedux
             }
         }
 
-        private const int E_NOTIMPL = unchecked((int)0x80004001);
 
         // IDataObject
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
         private unsafe static int GetData(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium)
         {
             *medium = default;
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int GetDataHere(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium)
         {
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int QueryGetData(IntPtr _this, /*optional*/ FORMATETC* format)
         {
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int GetCanonicalFormatEtc(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut)
         {
             formatOut = default;
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int SetData(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium, int shouldRelease)
         {
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int EnumFormatEtc(IntPtr _this, int direction, IntPtr* enumFORMATETC)
         {
             *enumFORMATETC = default;
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int DAdvise(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection)
         {
             *connection = default;
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private static int DUnadvise(IntPtr _this, int connection)
         {
             return E_NOTIMPL;
         }
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+
         private unsafe static int EnumDAdvise(IntPtr _this, IntPtr* enumSTATDATA)
         {
             *enumSTATDATA = default;

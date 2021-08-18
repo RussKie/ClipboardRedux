@@ -34,11 +34,24 @@ namespace ClipboardRedux
             }
 
             IntPtr instance;
-            int hr = Ole32.OleGetClipboard(out instance);
-            if (hr != 0)
+            int hr;
+            int retry = 100;
+            do
             {
-                Marshal.ThrowExceptionForHR(hr);
+                hr = Ole32.OleGetClipboard(out instance);
+                if (hr != 0)
+                {
+                    if (retry == 0)
+                    {
+                        // throw new ExternalException(SR.ClipboardOperationFailed, (int)hr);
+                        Marshal.ThrowExceptionForHR(hr);
+                    }
+
+                    retry--;
+                    Thread.Sleep(millisecondsTimeout: 100);
+                }
             }
+            while (hr != 0);
 
             // Check if the returned value is actually a wrapped managed instance.
             if (CCW_IDataObject.TryGetInstance(instance, out Forms_IDataObject? forms_dataObject))
@@ -224,6 +237,10 @@ namespace ClipboardRedux
         public IntPtr QueryInterface;
         public IntPtr AddRef;
         public IntPtr Release;
+
+        public unsafe delegate int QueryInterfaceDelegate(IntPtr _this, Guid* iid, IntPtr* obj);
+        public delegate uint AddRefDelegate(IntPtr _this);
+        public delegate uint ReleaseDelegate(IntPtr _this);
 #endif
     }
 
@@ -254,6 +271,16 @@ namespace ClipboardRedux
         public IntPtr DAdvise;
         public IntPtr DUnadvise;
         public IntPtr EnumDAdvise;
+
+        public unsafe delegate int GetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
+        public unsafe delegate int GetDataHereDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
+        public unsafe delegate int QueryGetDataDelegate(IntPtr _this, /*optional*/ FORMATETC* format);
+        public unsafe delegate int GetCanonicalFormatEtcDelegate(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut);
+        public unsafe delegate int SetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium, int shouldRelease);
+        public unsafe delegate int EnumFormatEtcDelegate(IntPtr _this, int direction, IntPtr* enumFORMATETC);
+        public unsafe delegate int DAdviseDelegate(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection);
+        public delegate int DUnadviseDelegate(IntPtr _this, int connection);
+        public unsafe delegate int EnumDAdviseDelegate(IntPtr _this, IntPtr* enumSTATDATA);
 #endif
     }
 
@@ -335,7 +362,8 @@ namespace ClipboardRedux
                 (IntPtr instance, IntPtr vtable) = GetContextSafeRef(this.agileInstance);
                 fixed (FORMATETC* formatFixed = &format)
                 {
-                    hr = ((DataObjectVTable*)vtable)->GetData(instance, formatFixed, &stgmed);
+                    var getDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.GetDataDelegate>(((DataObjectVTable*)vtable)->GetData);
+                    hr = getDataDelegate.Invoke(instance, formatFixed, &stgmed);
                 }
                 Marshal.Release(instance);
 
@@ -394,7 +422,8 @@ namespace ClipboardRedux
                 (IntPtr instance, IntPtr vtable) = GetContextSafeRef(this.agileInstance);
                 fixed (FORMATETC* formatFixed = &formatIn)
                 {
-                    hr = ((DataObjectVTable*)vtable)->SetData(instance, formatFixed, &stgmed, isRelease);
+                    var setDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.SetDataDelegate>(((DataObjectVTable*)vtable)->SetData);
+                    hr = setDataDelegate.Invoke(instance, formatFixed, &stgmed, isRelease);
                 }
 
                 Marshal.Release(instance);
@@ -430,21 +459,6 @@ namespace ClipboardRedux
     internal static class CCW_IDataObject
     {
         private const int E_NOTIMPL = unchecked((int)0x80004001);
-
-        // IUnknown
-        private unsafe delegate int QueryInterfaceDelegate(IntPtr _this, Guid* iid, IntPtr* obj);
-        private delegate uint AddRefDelegate(IntPtr _this);
-        private delegate uint ReleaseDelegate(IntPtr _this);
-        // IDataObject
-        private unsafe delegate int GetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
-        private unsafe delegate int GetDataHereDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
-        private unsafe delegate int QueryGetDataDelegate(IntPtr _this, /*optional*/ FORMATETC* format);
-        private unsafe delegate int GetCanonicalFormatEtcDelegate(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut);
-        private unsafe delegate int SetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium, int shouldRelease);
-        private unsafe delegate int EnumFormatEtcDelegate(IntPtr _this, int direction, IntPtr* enumFORMATETC);
-        private unsafe delegate int DAdviseDelegate(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection);
-        private delegate int DUnadviseDelegate(IntPtr _this, int connection);
-        private unsafe delegate int EnumDAdviseDelegate(IntPtr _this, IntPtr* enumSTATDATA);
 
         private static List<Delegate> delegates = new List<Delegate>();
         private static Lazy<IntPtr> CCWVTable = new Lazy<IntPtr>(AllocateVTable, isThreadSafe: true);
@@ -498,18 +512,18 @@ namespace ClipboardRedux
                 // Allocate and create a singular VTable for this type projection.
                 var vtable = (DataObjectVTable*)Marshal.AllocCoTaskMem(sizeof(DataObjectVTable));
 
-                var queryInterfaceDelegate = new QueryInterfaceDelegate(QueryInterface);
-                var addRefDelegate = new AddRefDelegate(AddRef);
-                var releaseDelegate = new ReleaseDelegate(Release);
-                var getDataDelegate = new GetDataDelegate(GetData);
-                var getDataHereDelegate = new GetDataHereDelegate(GetDataHere);
-                var queryGetDataDelegate = new QueryGetDataDelegate(QueryGetData);
-                var getCanonicalFormatEtcDelegate = new GetCanonicalFormatEtcDelegate(GetCanonicalFormatEtc);
-                var setDataDelegate = new SetDataDelegate(SetData);
-                var enumFormatEtcDelegate = new EnumFormatEtcDelegate(EnumFormatEtc);
-                var dAdviseDelegate = new DAdviseDelegate(DAdvise);
-                var dUnadviseDelegate = new DUnadviseDelegate(DUnadvise);
-                var enumDAdviseDelegate = new EnumDAdviseDelegate(EnumDAdvise);
+                var queryInterfaceDelegate = new IUnknownVTable.QueryInterfaceDelegate(QueryInterface);
+                var addRefDelegate = new IUnknownVTable.AddRefDelegate(AddRef);
+                var releaseDelegate = new IUnknownVTable.ReleaseDelegate(Release);
+                var getDataDelegate = new DataObjectVTable.GetDataDelegate(GetData);
+                var getDataHereDelegate = new DataObjectVTable.GetDataHereDelegate(GetDataHere);
+                var queryGetDataDelegate = new DataObjectVTable.QueryGetDataDelegate(QueryGetData);
+                var getCanonicalFormatEtcDelegate = new DataObjectVTable.GetCanonicalFormatEtcDelegate(GetCanonicalFormatEtc);
+                var setDataDelegate = new DataObjectVTable.SetDataDelegate(SetData);
+                var enumFormatEtcDelegate = new DataObjectVTable.EnumFormatEtcDelegate(EnumFormatEtc);
+                var dAdviseDelegate = new DataObjectVTable.DAdviseDelegate(DAdvise);
+                var dUnadviseDelegate = new DataObjectVTable.DUnadviseDelegate(DUnadvise);
+                var enumDAdviseDelegate = new DataObjectVTable.EnumDAdviseDelegate(EnumDAdvise);
 
                 delegates.Add(queryInterfaceDelegate);
                 delegates.Add(addRefDelegate);
@@ -554,7 +568,7 @@ namespace ClipboardRedux
 
                 Debug.Assert(lifetime->Handle != IntPtr.Zero);
                 Debug.Assert(lifetime->RefCount > 0);
-                return (Forms_IDataObject)GCHandle.FromIntPtr(lifetime->Handle).Target;
+                return (Forms_IDataObject)GCHandle.FromIntPtr(lifetime->Handle).Target!;
             }
         }
 

@@ -2,10 +2,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 
-// Clean up warnings
-#pragma warning disable CS0649
-#pragma warning disable CA1416
-
 namespace ClipboardRedux
 {
     internal static class Interops
@@ -48,7 +44,5 @@ namespace ClipboardRedux
             public IntPtr unionmember;
             public IntPtr pUnkForRelease;
         }
-
     }
-
 }

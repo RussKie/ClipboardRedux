@@ -15,7 +15,7 @@ namespace app15
         {
             var format = DataFormats.UnicodeText;
 
-            Clipboard.SetDataObject("Hello world!");
+            //Clipboard.SetDataObject("Hello world!");
             // If we don't do this - it can fail with CLIPBRD_E_CANT_OPEN
             //var dataObject = Clipboard.GetDataObject();
 

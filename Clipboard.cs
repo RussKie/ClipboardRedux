@@ -224,6 +224,13 @@ namespace ClipboardRedux
 
     internal class RCW_IDataObject : IDataObject
     {
+        private static readonly TYMED[] ALLOWED_TYMEDS = new[]
+        {
+            TYMED.TYMED_HGLOBAL,
+            TYMED.TYMED_ISTREAM,
+            TYMED.TYMED_GDI
+        };
+
         private readonly RCW_IAgileReference agileInstance;
         private readonly IntPtr instanceInSta;
         private readonly unsafe DataObjectVTable* vtableInSta;
@@ -324,12 +331,67 @@ namespace ClipboardRedux
 
         public unsafe int QueryGetData(ref FORMATETC format)
         {
-            throw new NotImplementedException();
+            // Dispatch
+            HRESULT hr;
+            (IntPtr instance, IntPtr vtable) = GetContextSafeRef(this.agileInstance);
+            fixed (FORMATETC* pFormat = &format)
+            {
+                var queryGetDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.QueryGetDataDelegate>(((DataObjectVTable*)vtable)->QueryGetData);
+                hr = queryGetDataDelegate.Invoke(instance, pFormat);
+            }
+            Marshal.Release(instance);
+
+            if (hr.Failed())
+            {
+                return (int)HRESULT.S_FALSE;
+            }
+
+            if (format.dwAspect != DVASPECT.DVASPECT_CONTENT)
+            {
+                return (int)HRESULT.DV_E_DVASPECT;
+            }
+
+            if (!GetTymedUseable(format.tymed))
+            {
+                return (int)HRESULT.DV_E_TYMED;
+            }
+
+            if (format.cfFormat == 0)
+            {
+                return (int)HRESULT.S_FALSE;
+            }
+
+            Forms_DataFormats.Format dataFormat = Forms_DataFormats.GetFormat(format.cfFormat);
+            if (dataFormat.Id != format.cfFormat)
+            {
+                format.cfFormat = unchecked((short)(ushort)dataFormat.Id);
+                if (QueryGetData(ref format) != (int)HRESULT.S_OK)
+                {
+                    return (int)HRESULT.DV_E_FORMATETC;
+                }
+            }
+
+            return (int)HRESULT.S_OK;
         }
 
         public int GetCanonicalFormatEtc(ref FORMATETC formatIn, out FORMATETC formatOut)
         {
             throw new NotImplementedException();
+        }
+
+        /// <summary>
+        ///  Returns true if the tymed is useable.
+        /// </summary>
+        private bool GetTymedUseable(TYMED tymed)
+        {
+            for (int i = 0; i < ALLOWED_TYMEDS.Length; i++)
+            {
+                if ((tymed & ALLOWED_TYMEDS[i]) != 0)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public void SetData(ref FORMATETC formatIn, ref STGMEDIUM medium, bool release)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Runtime.InteropServices;
@@ -87,8 +87,8 @@ namespace ClipboardRedux
             (IntPtr instance, IntPtr vtable) = GetContextSafeRef(_agileInstance);
             fixed (FORMATETC* pFormat = &format)
             {
-                var getDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.GetDataDelegate>(((DataObjectVTable*)vtable)->GetData);
-                hr = getDataDelegate.Invoke(instance, pFormat, &stgmed);
+                var @delegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.GetDataDelegate>(((DataObjectVTable*)vtable)->GetData);
+                hr = @delegate.Invoke(instance, pFormat, &stgmed);
             }
             Marshal.Release(instance);
 
@@ -115,11 +115,10 @@ namespace ClipboardRedux
             (IntPtr instance, IntPtr vtable) = GetContextSafeRef(_agileInstance);
             fixed (FORMATETC* pFormat = &format)
             {
-                var queryGetDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.QueryGetDataDelegate>(((DataObjectVTable*)vtable)->QueryGetData);
-                hr = queryGetDataDelegate.Invoke(instance, pFormat);
+                var @delegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.QueryGetDataDelegate>(((DataObjectVTable*)vtable)->QueryGetData);
+                hr = @delegate.Invoke(instance, pFormat);
             }
             Marshal.Release(instance);
-
             if (hr.Failed())
             {
                 return (int)HRESULT.S_FALSE;

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.Windows.Forms;
 using ClipboardRedux;
 
@@ -26,7 +27,23 @@ namespace app15
             var dataObject1 = GetDataObject();
             if (dataObject1 is not null)
             {
-                Debug.WriteLine(dataObject1.GetData(format));
+                if (dataObject1.GetDataPresent(DataFormats.Bitmap))
+                {
+                    var data = dataObject1.GetData(DataFormats.Bitmap);
+                    if (data is Bitmap bitmap)
+                    {
+                        bitmap.Save(@"C:\Users\igveliko\Desktop\b.bmp");
+                        bitmap.Dispose();
+                    }
+                    else
+                    {
+                        Debug.WriteLine("Not a bitmap");
+                    }
+                }
+                else if (dataObject1.GetDataPresent(DataFormats.Text))
+                {
+                    Debug.WriteLine(dataObject1.GetData(DataFormats.Text));
+                }
             }
             else
             {

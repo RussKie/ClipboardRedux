@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Windows.Forms;
 using ClipboardRedux;
 
@@ -25,10 +26,12 @@ namespace app15
             var dataObject1 = GetDataObject();
             if (dataObject1 is not null)
             {
-                Console.WriteLine(dataObject1.GetData(format));
+                Debug.WriteLine(dataObject1.GetData(format));
             }
-
-            Console.WriteLine("opps");
+            else
+            {
+                Debug.WriteLine("opps");
+            }
         }
 
         private static IDataObject? GetDataObject()

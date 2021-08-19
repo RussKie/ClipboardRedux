@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 
 using Forms_IDataObject = System.Windows.Forms.IDataObject;
+using Forms_DataFormats = System.Windows.Forms.DataFormats;
 
 // Clean up warnings
 #pragma warning disable CS0649
@@ -18,12 +19,9 @@ namespace ClipboardRedux
     {
         public static void Initialize()
         {
-            int hr = Ole32.OleInitialize(IntPtr.Zero);
-            // S_FALSE is a valid HRESULT
-            if (hr < 0)
-            {
-                Marshal.ThrowExceptionForHR(hr);
-            }
+            Interops.Ole32
+                .OleInitialize(IntPtr.Zero)
+                .ThrowIfFailed();
         }
 
         public static object Get()
@@ -33,25 +31,7 @@ namespace ClipboardRedux
                 throw new InvalidOperationException();
             }
 
-            IntPtr instance;
-            int hr;
-            int retry = 100;
-            do
-            {
-                hr = Ole32.OleGetClipboard(out instance);
-                if (hr != 0)
-                {
-                    if (retry == 0)
-                    {
-                        // throw new ExternalException(SR.ClipboardOperationFailed, (int)hr);
-                        Marshal.ThrowExceptionForHR(hr);
-                    }
-
-                    retry--;
-                    Thread.Sleep(millisecondsTimeout: 100);
-                }
-            }
-            while (hr != 0);
+            Interops.Ole32.OleGetClipboard(out IntPtr instance).ThrowIfFailed();
 
             // Check if the returned value is actually a wrapped managed instance.
             if (CCW_IDataObject.TryGetInstance(instance, out Forms_IDataObject? forms_dataObject))
@@ -59,19 +39,18 @@ namespace ClipboardRedux
                 return forms_dataObject;
             }
 
-            IntPtr agileReference;
             var iid = typeof(IDataObject).GUID;
-            hr = Ole32.RoGetAgileReference(
-                Ole32.AgileReferenceOptions.Default,
+            HRESULT hr = Interops.Ole32.RoGetAgileReference(
+                Interops.Ole32.AgileReferenceOptions.Default,
                 ref iid,
                 instance,
-                out agileReference);
-            if (hr != 0)
+                out IntPtr agileReference);
+            if (hr != HRESULT.S_OK)
             {
                 // Release the clipboard object if agile
                 // reference creation failed.
                 Marshal.Release(instance);
-                Marshal.ThrowExceptionForHR(hr);
+                Marshal.ThrowExceptionForHR((int)hr);
             }
 
             // Wrap the agile reference.
@@ -91,28 +70,25 @@ namespace ClipboardRedux
                 throw new InvalidOperationException();
             }
 
-            int hr;
+            HRESULT hr;
             if (obj is null)
             {
-                hr = Ole32.OleSetClipboard(IntPtr.Zero);
-                if (hr != 0)
-                {
-                    Marshal.ThrowExceptionForHR(hr);
-                }
-
+                Interops.Ole32
+                    .OleSetClipboard(IntPtr.Zero)
+                    .ThrowIfFailed();
                 return;
             }
 
             if (obj is RCW_IDataObject com_dataobject)
             {
-                hr = Ole32.OleSetClipboard(com_dataobject.GetInstanceForSta());
+                hr = Interops.Ole32.OleSetClipboard(com_dataobject.GetInstanceForSta());
             }
             else if (obj is Forms_IDataObject forms_dataObject)
             {
                 // This approach is less than ideal since a new wrapper is always
                 // created. Having an efficient cache would be more effective.
                 var ccw = CCW_IDataObject.CreateInstance(forms_dataObject);
-                hr = Ole32.OleSetClipboard(ccw);
+                hr = Interops.Ole32.OleSetClipboard(ccw);
             }
             else
             {
@@ -122,47 +98,12 @@ namespace ClipboardRedux
                 throw new NotImplementedException();
             }
 
-            if (hr != 0)
-            {
-                Marshal.ThrowExceptionForHR(hr);
-            }
+            hr.ThrowIfFailed();
         }
 
-        public static int Flush()
+        public static HRESULT Flush()
         {
-            return Ole32.OleFlushClipboard();
-        }
-
-        private static class Ole32
-        {
-            [DllImport(nameof(Ole32), ExactSpelling = true)]
-            public static extern int OleInitialize(IntPtr reserved);
-
-            [DllImport(nameof(Ole32), ExactSpelling = true)]
-            public static extern int OleGetClipboard(out IntPtr dataObject);
-
-            [DllImport(nameof(Ole32), ExactSpelling = true)]
-            public static extern int OleSetClipboard(IntPtr dataObject);
-
-            [DllImport(nameof(Ole32), ExactSpelling = true)]
-            public static extern int OleFlushClipboard();
-
-            public enum AgileReferenceOptions
-            {
-                Default = 0,
-                DelayedMarshal = 1,
-            };
-
-            // The RoGetAgileReference API is supported on Windows 8.1+.
-            //   See: https://docs.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-rogetagilereference
-            // For prior OS versions use the Global Interface Table (GIT).
-            //   See: https://docs.microsoft.com/windows/win32/com/creating-the-global-interface-table
-            [DllImport(nameof(Ole32), ExactSpelling = true)]
-            public static extern int RoGetAgileReference(
-                AgileReferenceOptions opts,
-                ref Guid riid,
-                IntPtr instance,
-                out IntPtr agileReference);
+            return Interops.Ole32.OleFlushClipboard();
         }
     }
 
@@ -175,12 +116,12 @@ namespace ClipboardRedux
             //
             //      public IUnknownVTable UnknownVTable;
 
-            public delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, int> QueryInterface;
-            public delegate* unmanaged[Stdcall]<IntPtr, int> AddRef;
-            public delegate* unmanaged[Stdcall]<IntPtr, int> Release;
+            public delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, HRESULT> QueryInterface;
+            public delegate* unmanaged[Stdcall]<IntPtr, HRESULT> AddRef;
+            public delegate* unmanaged[Stdcall]<IntPtr, HRESULT> Release;
 
             // IAgileReference
-            public delegate* unmanaged[Stdcall]<IntPtr, ref Guid, out IntPtr, int> Resolve;
+            public delegate* unmanaged[Stdcall]<IntPtr, ref Guid, out IntPtr, HRESULT> Resolve;
         }
 
         private readonly IntPtr instance;
@@ -212,23 +153,13 @@ namespace ClipboardRedux
                 IntPtr resolvedInstance;
 
                 // Dispatch
-                int hr = this.vtable->Resolve(this.instance, ref iid, out resolvedInstance);
-                if (hr != 0)
-                {
-                    Marshal.ThrowExceptionForHR(hr);
-                }
+                this.vtable->Resolve(this.instance, ref iid, out resolvedInstance)
+                    .ThrowIfFailed();
 
                 // Unmarshal
                 return resolvedInstance;
             }
         }
-    }
-
-    internal struct STGMEDIUM_Blittable
-    {
-        public TYMED tymed;
-        public IntPtr unionmember;
-        public IntPtr pUnkForRelease;
     }
 
     internal unsafe struct IUnknownVTable
@@ -259,11 +190,11 @@ namespace ClipboardRedux
 
         // IDataObject
 #if NET50_OR_GREATER
-        public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, STGMEDIUM_Blittable*, int> GetData;
-        public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, STGMEDIUM_Blittable*, int> GetDataHere;
+        public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, Interops.STGMEDIUM*, int> GetData;
+        public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, Interops.STGMEDIUM*, int> GetDataHere;
         public delegate* unmanaged[Stdcall]<IntPtr, /*optional*/ FORMATETC*, int> QueryGetData;
         public delegate* unmanaged[Stdcall]<IntPtr, /*optional*/ FORMATETC*, FORMATETC*, int> GetCanonicalFormatEtc;
-        public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, STGMEDIUM_Blittable*, int, int> SetData;
+        public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, Interops.STGMEDIUM*, int, int> SetData;
         public delegate* unmanaged[Stdcall]<IntPtr, int, IntPtr*, int> EnumFormatEtc;
         public delegate* unmanaged[Stdcall]<IntPtr, FORMATETC*, int, IntPtr, int*, int> DAdvise;
         public delegate* unmanaged[Stdcall]<IntPtr, int, int> DUnadvise;
@@ -279,15 +210,15 @@ namespace ClipboardRedux
         public IntPtr DUnadvise;
         public IntPtr EnumDAdvise;
 
-        public unsafe delegate int GetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
-        public unsafe delegate int GetDataHereDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium);
-        public unsafe delegate int QueryGetDataDelegate(IntPtr _this, /*optional*/ FORMATETC* format);
-        public unsafe delegate int GetCanonicalFormatEtcDelegate(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut);
-        public unsafe delegate int SetDataDelegate(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium, int shouldRelease);
-        public unsafe delegate int EnumFormatEtcDelegate(IntPtr _this, int direction, IntPtr* enumFORMATETC);
-        public unsafe delegate int DAdviseDelegate(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection);
-        public delegate int DUnadviseDelegate(IntPtr _this, int connection);
-        public unsafe delegate int EnumDAdviseDelegate(IntPtr _this, IntPtr* enumSTATDATA);
+        public unsafe delegate HRESULT GetDataDelegate(IntPtr _this, FORMATETC* format, Interops.STGMEDIUM* medium);
+        public unsafe delegate HRESULT GetDataHereDelegate(IntPtr _this, FORMATETC* format, Interops.STGMEDIUM* medium);
+        public unsafe delegate HRESULT QueryGetDataDelegate(IntPtr _this, /*optional*/ FORMATETC* format);
+        public unsafe delegate HRESULT GetCanonicalFormatEtcDelegate(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut);
+        public unsafe delegate HRESULT SetDataDelegate(IntPtr _this, FORMATETC* format, Interops.STGMEDIUM* medium, int shouldRelease);
+        public unsafe delegate HRESULT EnumFormatEtcDelegate(IntPtr _this, int direction, IntPtr* enumFORMATETC);
+        public unsafe delegate HRESULT DAdviseDelegate(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection);
+        public delegate HRESULT DUnadviseDelegate(IntPtr _this, int connection);
+        public unsafe delegate HRESULT EnumDAdviseDelegate(IntPtr _this, IntPtr* enumSTATDATA);
 #endif
     }
 
@@ -361,23 +292,20 @@ namespace ClipboardRedux
             unsafe
             {
                 // Marshal
-                var stgmed = default(STGMEDIUM_Blittable);
+                var stgmed = default(Interops.STGMEDIUM);
                 medium = default;
 
                 // Dispatch
-                int hr;
+                HRESULT hr;
                 (IntPtr instance, IntPtr vtable) = GetContextSafeRef(this.agileInstance);
-                fixed (FORMATETC* formatFixed = &format)
+                fixed (FORMATETC* pFormat = &format)
                 {
                     var getDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.GetDataDelegate>(((DataObjectVTable*)vtable)->GetData);
-                    hr = getDataDelegate.Invoke(instance, formatFixed, &stgmed);
+                    hr = getDataDelegate.Invoke(instance, pFormat, &stgmed);
                 }
                 Marshal.Release(instance);
 
-                if (hr != 0)
-                {
-                    Marshal.ThrowExceptionForHR(hr);
-                }
+                hr.ThrowIfFailed();
 
                 // Unmarshal
                 medium.tymed = stgmed.tymed;
@@ -394,7 +322,7 @@ namespace ClipboardRedux
             throw new NotImplementedException();
         }
 
-        public int QueryGetData(ref FORMATETC format)
+        public unsafe int QueryGetData(ref FORMATETC format)
         {
             throw new NotImplementedException();
         }
@@ -415,7 +343,7 @@ namespace ClipboardRedux
                     pUnk = Marshal.GetIUnknownForObject(medium.pUnkForRelease);
                 }
 
-                var stgmed = new STGMEDIUM_Blittable()
+                var stgmed = new Interops.STGMEDIUM()
                 {
                     unionmember = medium.unionmember,
                     tymed = medium.tymed,
@@ -425,20 +353,17 @@ namespace ClipboardRedux
                 int isRelease = release ? 1 : 0;
 
                 // Dispatch
-                int hr;
+                HRESULT hr;
                 (IntPtr instance, IntPtr vtable) = GetContextSafeRef(this.agileInstance);
-                fixed (FORMATETC* formatFixed = &formatIn)
+                fixed (FORMATETC* pFormat = &formatIn)
                 {
                     var setDataDelegate = Marshal.GetDelegateForFunctionPointer<DataObjectVTable.SetDataDelegate>(((DataObjectVTable*)vtable)->SetData);
-                    hr = setDataDelegate.Invoke(instance, formatFixed, &stgmed, isRelease);
+                    hr = setDataDelegate.Invoke(instance, pFormat, &stgmed, isRelease);
                 }
 
                 Marshal.Release(instance);
 
-                if (hr != 0)
-                {
-                    Marshal.ThrowExceptionForHR(hr);
-                }
+                hr.ThrowIfFailed();
             }
         }
 
@@ -465,8 +390,6 @@ namespace ClipboardRedux
 
     internal static class CCW_IDataObject
     {
-        private const int E_NOTIMPL = unchecked((int)0x80004001);
-
         private static List<Delegate> delegates = new List<Delegate>();
         private static Lazy<IntPtr> CCWVTable = new Lazy<IntPtr>(AllocateVTable, isThreadSafe: true);
 
@@ -625,54 +548,55 @@ namespace ClipboardRedux
 
 
         // IDataObject
-        private unsafe static int GetData(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium)
+        private unsafe static HRESULT GetData(IntPtr _this, FORMATETC* format, Interops.STGMEDIUM* medium)
         {
             *medium = default;
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int GetDataHere(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium)
+        private unsafe static HRESULT GetDataHere(IntPtr _this, FORMATETC* format, Interops.STGMEDIUM* medium)
         {
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int QueryGetData(IntPtr _this, /*optional*/ FORMATETC* format)
+        private unsafe static HRESULT QueryGetData(IntPtr _this, /*optional*/ FORMATETC* format)
         {
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int GetCanonicalFormatEtc(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut)
+        private unsafe static HRESULT GetCanonicalFormatEtc(IntPtr _this, /*optional*/ FORMATETC* formatIn, FORMATETC* formatOut)
         {
             formatOut = default;
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int SetData(IntPtr _this, FORMATETC* format, STGMEDIUM_Blittable* medium, int shouldRelease)
+        private unsafe static HRESULT SetData(IntPtr _this, FORMATETC* format, Interops.STGMEDIUM* medium, int shouldRelease)
         {
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int EnumFormatEtc(IntPtr _this, int direction, IntPtr* enumFORMATETC)
+        private unsafe static HRESULT EnumFormatEtc(IntPtr _this, int direction, IntPtr* enumFORMATETC)
         {
             *enumFORMATETC = default;
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int DAdvise(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection)
+        private unsafe static HRESULT DAdvise(IntPtr _this, FORMATETC* format, int advf, IntPtr adviseSink, int* connection)
         {
             *connection = default;
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private static int DUnadvise(IntPtr _this, int connection)
+        private static HRESULT DUnadvise(IntPtr _this, int connection)
         {
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
 
-        private unsafe static int EnumDAdvise(IntPtr _this, IntPtr* enumSTATDATA)
+        private unsafe static HRESULT EnumDAdvise(IntPtr _this, IntPtr* enumSTATDATA)
         {
             *enumSTATDATA = default;
-            return E_NOTIMPL;
+            return HRESULT.E_NOTIMPL;
         }
     }
+
 }

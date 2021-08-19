@@ -1,4 +1,4 @@
-﻿namespace ClipboardRedux
+﻿namespace WindowsFormsClipboardRedux
 {
     internal enum HRESULT : int
     {

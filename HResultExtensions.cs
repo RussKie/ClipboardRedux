@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace ClipboardRedux
+namespace WindowsFormsClipboardRedux
 {
     internal static class HResultExtensions
     {

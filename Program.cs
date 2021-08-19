@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
-using ClipboardRedux;
+using WindowsFormsClipboardRedux;
 
 namespace app15
 {
@@ -21,7 +21,6 @@ namespace app15
             //var dataObject = Clipboard.GetDataObject();
 
 
-            ClipboardImpl.Initialize();
 
             // Fails with: 'System.InvalidCastException: Specified cast is not valid.'
             var dataObject1 = GetDataObject();

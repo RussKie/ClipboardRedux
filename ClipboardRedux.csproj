@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net472</TargetFramework>
-    <!--<TargetFramework>netcoreapp3.1</TargetFramework>-->
+    <!--<TargetFramework>net472</TargetFramework>-->
+    <TargetFrameworks>net472;netcoreapp3.1</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <!--<ImplicitUsings>enable</ImplicitUsings>-->

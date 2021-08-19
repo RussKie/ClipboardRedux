@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using WindowsFormsClipboardRedux;
 
@@ -14,16 +15,12 @@ namespace app15
         [STAThread]
         static void Main()
         {
-            var format = DataFormats.UnicodeText;
-
             //Clipboard.SetDataObject("Hello world!");
             // If we don't do this - it can fail with CLIPBRD_E_CANT_OPEN
             //var dataObject = Clipboard.GetDataObject();
 
-
-
             // Fails with: 'System.InvalidCastException: Specified cast is not valid.'
-            var dataObject1 = GetDataObject();
+            var dataObject1 = ClipboardRedux.GetDataObject();
             if (dataObject1 is not null)
             {
                 if (dataObject1.GetDataPresent(DataFormats.Bitmap))
@@ -31,8 +28,10 @@ namespace app15
                     var data = dataObject1.GetData(DataFormats.Bitmap);
                     if (data is Bitmap bitmap)
                     {
-                        bitmap.Save(@"C:\Users\igveliko\Desktop\b.bmp");
+                        string path = Path.GetFullPath("clipboard.bmp");
+                        bitmap.Save(path);
                         bitmap.Dispose();
+                        Debug.WriteLine($"Bitmap saved to {path}");
                     }
                     else
                     {
@@ -41,29 +40,13 @@ namespace app15
                 }
                 else if (dataObject1.GetDataPresent(DataFormats.Text))
                 {
-                    Debug.WriteLine(dataObject1.GetData(DataFormats.Text));
+                    Debug.WriteLine($"Text: {dataObject1.GetData(DataFormats.Text)}");
                 }
             }
             else
             {
                 Debug.WriteLine("opps");
             }
-        }
-
-        private static IDataObject? GetDataObject()
-        {
-            object dataObject = ClipboardImpl.Get();
-            if (dataObject is not null)
-            {
-                if (dataObject is IDataObject ido)
-                {
-                    return ido;
-                }
-
-                return new DataObject(dataObject);
-            }
-
-            return null;
         }
     }
 }

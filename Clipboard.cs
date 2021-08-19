@@ -170,7 +170,14 @@ namespace ClipboardRedux
     {
         private unsafe struct AgileReferenceVTable
         {
-            public IUnknownVTable UnknownVTable;
+            // Due to a bug in .NET Core 3.1 (3.1.18 as of now) we must inline IUnknown interface
+            // members explicitly, and can't do the following:
+            //
+            //      public IUnknownVTable UnknownVTable;
+
+            public delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, int> QueryInterface;
+            public delegate* unmanaged[Stdcall]<IntPtr, int> AddRef;
+            public delegate* unmanaged[Stdcall]<IntPtr, int> Release;
 
             // IAgileReference
             public delegate* unmanaged[Stdcall]<IntPtr, ref Guid, out IntPtr, int> Resolve;
